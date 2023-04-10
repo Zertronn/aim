@@ -120,6 +120,8 @@ def generate_key(data):
     return hashlib.md5(content.encode()).hexdigest()
 
 
+board_id = None
+
 viz_map_keys = {}
 
 
@@ -216,11 +218,14 @@ current_layout = []
 state = {}
 
 
-def set_state(update):
+def set_state(update, board_id):
     from js import setState
 
-    state.update(update)
-    setState(update)
+    if board_id not in state:
+        state[board_id] = {}
+
+    state[board_id].update(update)
+    setState(state, board_id)
 
 
 block_context = {
@@ -240,12 +245,13 @@ def render_to_layout(data):
     if is_found == False:
         current_layout.append(data)
 
-    updateLayout(current_layout)
+    updateLayout(current_layout, data["board_id"])
 
 
 class Element:
     def __init__(self):
         self.parent_block = None
+        self.board_id = board_id
 
     def set_parent_block(self, block):
         self.parent_block = block
@@ -272,7 +278,8 @@ class Block(Element):
             "element": 'block',
             "block_context": self.block_context,
             "key": self.key,
-            "parent_block": self.parent_block
+            "parent_block": self.parent_block,
+            "board_id": self.board_id
         }
 
         render_to_layout(block_data)
@@ -297,14 +304,13 @@ class Component(Element):
         self.data = None
         self.callbacks = {}
         self.options = {}
-        self.state = state[key] if key in state else {}
+        self.state = state[board_id][key] if board_id in state and key in state[board_id] else {}
         self.no_facet = True
 
     def set_state(self, value):
-        self.state.update(value)
         set_state({
             self.key: value
-        })
+        }, self.board_id)
 
     def render(self):
         component_data = {
@@ -314,7 +320,8 @@ class Component(Element):
             "callbacks": self.callbacks,
             "options": self.options,
             "parent_block": self.parent_block,
-            "no_facet": self.no_facet
+            "no_facet": self.no_facet,
+            "board_id": self.board_id
         }
 
         component_data.update(self.state)

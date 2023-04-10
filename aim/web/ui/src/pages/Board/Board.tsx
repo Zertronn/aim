@@ -20,18 +20,6 @@ import GridCell from './components/GridCell';
 
 import './Board.scss';
 
-function toObject(x: any): any {
-  if (x instanceof Map) {
-    return Object.fromEntries(
-      Array.from(x.entries(), ([k, v]) => [k, toObject(v)]),
-    );
-  } else if (x instanceof Array) {
-    return x.map(toObject);
-  } else {
-    return x;
-  }
-}
-
 function Board({
   data,
   isLoading,
@@ -41,7 +29,14 @@ function Board({
   onNotificationDelete,
   saveBoard,
 }: any): React.FunctionComponentElement<React.ReactNode> {
-  const { pyodide, namespace, isLoading: pyodideIsLoading } = usePyodide();
+  const {
+    pyodide,
+    namespace,
+    isLoading: pyodideIsLoading,
+    model: pyodideModel,
+  } = usePyodide();
+
+  const boardId = data.id;
 
   const editorValue = React.useRef(data.code);
   const [result, setResult] = React.useState([]);
@@ -49,29 +44,9 @@ function Board({
   const [isProcessing, setIsProcessing] = React.useState<boolean | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [execCode, setExecCode] = React.useState('');
-  const [state, setState] = React.useState<any>();
+  const [stateUpdateCount, setStateUpdateCount] = React.useState<any>(0);
   const [executionCount, setExecutionCount] = React.useState<number>(0);
   const timerId = React.useRef(0);
-
-  (window as any).updateLayout = (elements: any) => {
-    let layout = toObject(elements.toJs());
-    elements.destroy();
-
-    window.clearTimeout(timerId.current);
-    timerId.current = window.setTimeout(() => {
-      setBlocks(layout.filter((item: any) => item.element === 'block'));
-      setResult(layout.filter((item: any) => item.element !== 'block'));
-    }, 50);
-  };
-
-  (window as any).setState = (update: any) => {
-    let stateUpdate = update.toJs();
-    update.destroy();
-    setState((s: any) => ({
-      ...s,
-      ...toObject(stateUpdate),
-    }));
-  };
 
   const execute = React.useCallback(async () => {
     if (pyodide !== null) {
@@ -105,7 +80,6 @@ function Board({
         let resetLayoutCode = 'current_layout = []';
         pyodide?.runPython(resetLayoutCode, { globals: namespace });
 
-        setState(undefined);
         setResult([]);
         setExecCode(code);
         setExecutionCount((eC) => eC + 1);
@@ -129,10 +103,10 @@ function Board({
 block_context = {
   "current": 0,
 }
+board_id=${boardId === undefined ? 'None' : `"${boardId}"`}
 `;
-        pyodide?.runPython(resetCode, { globals: namespace });
         pyodide
-          ?.runPythonAsync(execCode, { globals: namespace })
+          ?.runPythonAsync(resetCode + execCode, { globals: namespace })
           .then(() => {
             setError(null);
             setIsProcessing(false);
@@ -147,7 +121,7 @@ block_context = {
         setIsProcessing(false);
       }
     }
-  }, [pyodide, execCode, namespace, state, executionCount]);
+  }, [pyodide, execCode, namespace, executionCount]);
 
   React.useEffect(() => {
     if (execCode) {
@@ -156,10 +130,10 @@ block_context = {
   }, [executionCount]);
 
   React.useEffect(() => {
-    if (state !== undefined) {
+    if (stateUpdateCount > 0) {
       runParsedCode();
     }
-  }, [state]);
+  }, [stateUpdateCount]);
 
   React.useEffect(() => {
     if (pyodideIsLoading) {
@@ -168,8 +142,25 @@ block_context = {
   }, [pyodideIsLoading]);
 
   React.useEffect(() => {
-    return () => window.clearTimeout(timerId.current);
-  }, []);
+    let subscription = pyodideModel.subscribe(
+      boardId,
+      ({ blocks, components, state }: any) => {
+        if (blocks) {
+          setBlocks(blocks[boardId]);
+        }
+        if (components) {
+          setResult(components[boardId]);
+        }
+        if (state) {
+          setStateUpdateCount((sUC: number) => sUC + 1);
+        }
+      },
+    );
+    return () => {
+      window.clearTimeout(timerId.current);
+      subscription.unsubscribe();
+    };
+  }, [boardId]);
 
   function constructTree(elems: any, tree: any) {
     for (let i = 0; i < elems.length; i++) {
@@ -250,7 +241,7 @@ block_context = {
                   initialState={data}
                 />
                 <Link
-                  to={PathEnum.Board.replace(':boardId', data.id)}
+                  to={PathEnum.Board.replace(':boardId', boardId)}
                   component={RouteLink}
                   underline='none'
                 >
@@ -261,7 +252,7 @@ block_context = {
               </div>
             ) : (
               <Link
-                to={PathEnum.Board_Edit.replace(':boardId', data.id)}
+                to={PathEnum.Board_Edit.replace(':boardId', boardId)}
                 component={RouteLink}
                 underline='none'
               >
